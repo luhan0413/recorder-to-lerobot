@@ -2,3 +2,4 @@ av==15.1.0
 lerobot[dataset]==0.6.1
 numpy==2.2.6
 scipy==1.18.1
+opencv-python-headless>=4.10

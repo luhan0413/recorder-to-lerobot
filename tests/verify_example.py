@@ -17,14 +17,21 @@ def verify(root):
         row = dataset[index]
         local = index % 11
         np.testing.assert_allclose(
-            float(row["observation.state"][0]), local * 0.01, atol=1e-6
+            float(row["observation.tcp_pose"][0]), local * 0.01, atol=1e-6
         )
+        np.testing.assert_allclose(float(row["observation.state"][0]), local * 0.001, atol=1e-6)
+        following = min(local + 1, 10)
+        np.testing.assert_allclose(float(row["action_joints"][0]), following * 0.001, atol=1e-6)
+        assert "action" not in row and "observation.joints" not in row
+        assert "next.reward" not in row and "annotation.language.language_instruction" not in row
         assert int(row["frame_index"]) == local
         assert int(row["episode_index"]) == index // 11
         assert bool(row["next.done"]) == (local == 10)
         assert row["observation.images.left"].shape == (3, 48, 64)
         if local == 10:
-            np.testing.assert_allclose(row["action"][:6].numpy(), 0)
+            np.testing.assert_allclose(row["action_tcp"][:6].numpy(), 0)
+            np.testing.assert_allclose(row["action_tcp_base"][:6].numpy(), 0)
+            np.testing.assert_allclose(row["action_joints"].numpy(), row["observation.state"].numpy())
     provenance = json.loads((root / "meta/conversion.json").read_text())
     assert provenance["action_source"] == "next_measured_state"
     assert provenance["gripper_source"] == "commanded"

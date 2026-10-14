@@ -12,7 +12,7 @@ from schema import DEFAULTS, FPS, POSE
 class Segment:
     state: np.ndarray
     joints: np.ndarray
-    action: np.ndarray
+    action: dict
     selections: dict
     report: dict
 
@@ -64,17 +64,32 @@ def interpolate(rows, times, grid):
     return np.column_stack([aligned, grip]), np.column_stack([aligned_joints, grip])
 
 
-def actions(state):
-    result = np.zeros_like(state, dtype=np.float32)
-    result[:-1, :3] = np.diff(state[:, :3], axis=0)
-    rotation = Rotation.from_rotvec(state[:, 3:6])
-    result[:-1, 3:6] = (rotation[1:] * rotation[:-1].inv()).as_rotvec()
-    result[:-1, 6] = state[1:, 6]
-    result[-1, 6] = state[-1, 6]
+def actions(state, joints=None):
+    """Match the recorder's local/base TCP deltas and next absolute joints."""
+    import cv2
+
+    state = np.asarray(state, dtype=np.float64)
+    local = np.zeros_like(state, dtype=np.float32)
+    base = np.zeros_like(state, dtype=np.float32)
+    for i in range(len(state) - 1):
+        current_rotation, _ = cv2.Rodrigues(state[i, 3:6])
+        next_rotation, _ = cv2.Rodrigues(state[i + 1, 3:6])
+        translation = state[i + 1, :3] - state[i, :3]
+        local[i, :3] = current_rotation.T @ translation
+        base[i, :3] = translation
+        local[i, 3:6] = cv2.Rodrigues(current_rotation.T @ next_rotation)[0].ravel()
+        base[i, 3:6] = cv2.Rodrigues(next_rotation @ current_rotation.T)[0].ravel()
+    for delta in (local, base):
+        delta[:-1, 6] = state[1:, 6]
+        delta[-1, 6] = state[-1, 6]
+    result = {"action_tcp": local, "action_tcp_base": base}
+    if joints is not None:
+        joints = np.asarray(joints, dtype=np.float32)
+        result["action_joints"] = np.concatenate([joints[1:], joints[-1:]], axis=0)
     return result
 
 
-def build_segments(path, rows, cameras, limits=None):
+def build_segments(path, rows, cameras, limits=None, preserve_episodes=False):
     limits = DEFAULTS | (limits or {})
     for key, value in limits.items():
         if not np.isfinite(value) or value <= 0:
@@ -92,6 +107,8 @@ def build_segments(path, rows, cameras, limits=None):
         "rejected_grid_points": [],
         "segments": [],
         "quality_verified": True,
+        "preserve_episodes": preserve_episodes,
+        "diagnostic_warnings": [],
         "max_sample_gap_seconds": float(gap.max()),
         "rtde_age": statistics([r.get("rtde_age_seconds") for r in rows]),
         "pairing_skew": {
@@ -116,6 +133,14 @@ def build_segments(path, rows, cameras, limits=None):
             elif value > threshold + 1e-9:
                 reasons.append(f"{column}:above_limit")
         if missing or reasons:
+            if preserve_episodes:
+                report["diagnostic_warnings"].append(
+                    {"frame_index": i, "timestamp": float(times[i]),
+                     "reasons": reasons, "missing_diagnostics": missing}
+                )
+                if missing:
+                    report["unverifiable_samples"] += 1
+                continue
             valid[i] = False
             report["excluded_rows"].append(
                 {
@@ -132,6 +157,10 @@ def build_segments(path, rows, cameras, limits=None):
     report["quality_verified"] = report["unverifiable_samples"] == 0
     # Keep every original gap as a boundary, including gaps adjacent to excluded rows.
     gap_boundaries = np.flatnonzero(gap > limits["max_sample_gap_seconds"] + 1e-9) + 1
+    if preserve_episodes:
+        report["diagnostic_policy"] = "retain all rows; thresholds are diagnostic only; one output episode per source"
+        report["gap_threshold_exceedances"] = gap_boundaries.tolist()
+        gap_boundaries = np.array([], dtype=int)
     for boundary in gap_boundaries:
         report["split_positions"].append(
             {
@@ -167,6 +196,12 @@ def build_segments(path, rows, cameras, limits=None):
         selected = nearest(local_times, grid)
         error = abs(local_times[selected] - grid)
         adopt = error <= limits["max_image_alignment_error_seconds"] + 1e-9
+        if preserve_episodes:
+            report["alignment_threshold_exceedances"] = [
+                {"timestamp": float(grid[i]), "alignment_error_seconds": float(error[i])}
+                for i in np.flatnonzero(~adopt)
+            ]
+            adopt[:] = True
         for i in np.flatnonzero(~adopt):
             rejected = {
                 "timestamp": float(grid[i]),
@@ -216,12 +251,14 @@ def build_segments(path, rows, cameras, limits=None):
                 Segment(
                     state.astype(np.float32),
                     joint_state.astype(np.float32),
-                    actions(state),
+                    actions(state, joint_state),
                     {n: chosen for n in cameras},
                     segment_report,
                 )
             )
     report["output_frames"] = sum(len(s.state) for s in segments)
+    if preserve_episodes and len(segments) != 1:
+        raise ValueError(f"{path}: preserving episodes requires at least two output frames")
     report["output_episodes"] = len(segments)
     report["image_alignment_error"] = statistics(all_errors)
     total = report["output_frames"]

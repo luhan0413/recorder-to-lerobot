@@ -36,6 +36,8 @@ python converter.py \
 
 `--input` 接受單一 episode 或包含 `episode_*` 的父資料夾。預設輸出 `outputs/dataset`，相機為 `left`；雙相機使用 `--cameras left wrist`。`--repo-id` 是資料集識別名稱，不會觸發上傳。
 
+若要保持原始 episode 數量，加入 `--preserve-episodes`。每個來源 episode 輸出一個 episode，仍按 CSV 時間重採樣至 10 FPS；採樣間隔、影像對齊與診斷門檻只記錄在品質報告，不排除樣本或切段，插值與 action 會跨越原始時間間隔。來源若不足兩個輸出格點會報錯。
+
 輸出路徑與報告檔案必須尚未存在。輸入格式不合格會拒絕整批；品質不合格的樣本會排除並記錄。正式轉換至少要有一段兩幀以上的有效片段。`--validate-only` 可用來查看沒有有效片段的原因。
 
 ## 輸入格式
@@ -109,7 +111,13 @@ rtde_age_seconds,camera_left_pairing_skew_seconds
 
 每段從第一個有效 CSV timestamp 建立 0.1 秒格點，不外推。位置與關節採線性插值，旋轉採 SO(3) 最短路徑插值，夾爪保持格點之前最近的命令；影像採最近樣本。影像時間差超標的格點會再次切段，少於兩個輸出格點的片段捨棄。
 
-Action 位置為 `p_next - p_current`，旋轉為 `rotvec(R_next @ R_current.T)`，夾爪為下一個格點的命令。末幀位置與旋轉 delta 為零、夾爪保持當前命令，`next.done=true`。
+輸出欄位與 `recording_training_replay_service.py` 的現行錄製 schema 一致：
+
+- `action_tcp`：局部工具座標平移 `R_current.T @ (p_next - p_current)`，旋轉 `rotvec(R_current.T @ R_next)`。
+- `action_tcp_base`：base 座標平移 `p_next - p_current`，旋轉 `rotvec(R_next @ R_current.T)`。
+- `action_joints`：下一個格點的六關節絕對角度與夾爪命令。
+
+三種 action 的夾爪都是下一個格點的絕對命令。末幀兩種 TCP delta 為零，關節與夾爪保持當前值，`next.done=true`。轉換器仍保留 raw CSV 的品質篩選與時間重採樣；這部分是離線 raw 轉換所需的處理。
 
 時間基準為 CSV `timestamp`。MP4 播放時間與 native clock 不用來建立重採樣格點；host 診斷通過也不表示感測器曝光已同步。
 
@@ -131,12 +139,16 @@ outputs/my_dataset/
 
 | 資料欄位 | 內容 |
 | --- | --- |
-| `observation.state` | 7 維：TCP pose＋夾爪命令 |
-| `observation.joints` | 7 維：六關節＋夾爪命令 |
-| `action` | 7 維：base pose delta＋下一筆夾爪命令 |
+| `observation.state` | 7 維：六關節角度＋夾爪命令 |
+| `observation.tcp_pose` | 7 維：base TCP pose＋夾爪命令 |
+| `action_tcp` | 7 維：局部 TCP delta＋下一筆夾爪命令 |
+| `action_tcp_base` | 7 維：base TCP delta＋下一筆夾爪命令 |
+| `action_joints` | 7 維：下一筆絕對關節角度＋夾爪命令 |
 | `observation.images.<相機>` | RGB 影像 |
-| `annotation.language.language_instruction` | 任務文字索引 |
-| `next.done` / `next.reward` | 片段終止標記／固定 0 |
+| `next.done` | 片段終止標記 |
+
+任務文字透過官方 writer 的 `task` 寫入 `tasks.parquet` 與 `task_index`。不再輸出舊版 `observation.joints`、`action`、`next.reward` 或 `annotation.language.language_instruction`。此變更不會修改既有資料集；需要由 raw 重新轉換到新的輸出路徑。
+
 
 每個輸出片段的時間從 0 開始。影片使用 H.264 CRF18／YUV420 有損編碼，分檔與 episode 範圍由官方 writer 管理。完整寫入後才移至輸出路徑；一般失敗會清理暫存目錄，強制終止可能留下隱藏暫存目錄。
 

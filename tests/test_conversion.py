@@ -1,5 +1,6 @@
 """Quality boundaries and official-writer round-trip checks."""
 
+import ast
 import contextlib
 import io
 import json
@@ -34,7 +35,56 @@ def samples(times):
     ]
 
 
+def recorder_reference():
+    """Load only pure recorder functions, without hardware/service imports."""
+    path = Path(__file__).resolve().parents[2] / "recording_training_replay_service.py"
+    tree = ast.parse(path.read_text())
+    functions = {"tcp_local_delta", "tcp_base_delta", "sample_to_lerobot_frame", "_lerobot_features"}
+    nodes = [node for node in tree.body if
+             isinstance(node, ast.FunctionDef) and node.name in functions or
+             isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id.startswith("LEROBOT_") for t in node.targets)]
+    namespace = {"np": np}
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), "exec"), namespace)
+    return namespace
+
+
 class QualityTests(unittest.TestCase):
+    def test_actions_match_live_recorder(self):
+        reference = recorder_reference()
+        state = np.array([
+            [0.2, -0.3, 0.4, 0.3, -0.5, 1.2, 0],
+            [0.22, -0.29, 0.38, -0.4, 0.2, 1.3, 1],
+            [0.21, -0.28, 0.42, 0.1, 0.6, -0.7, 0],
+        ])
+        joints = np.arange(21).reshape(3, 7) / 20
+        joints[:, 6] = state[:, 6]
+        calculated = actions(state, joints)
+        for i in range(len(state)):
+            following = min(i + 1, len(state) - 1)
+            def sample(index):
+                return {"tcp_pose": state[index, :6].tolist(),
+                        "joints": joints[index, :6].tolist(),
+                        "gripper": state[index, 6], "images": {}}
+            expected = reference["sample_to_lerobot_frame"](
+                sample(i), sample(following), "test", done=i == len(state) - 1)
+            for key in calculated:
+                np.testing.assert_allclose(calculated[key][i], expected[key], atol=1e-7)
+
+    def test_preserve_episodes_keeps_gaps_and_diagnostic_outliers(self):
+        rows = samples([0, 0.1, 0.4, 0.5])
+        rows[1]["rtde_age_seconds"] = 0.2
+        segments, report = build_segments(
+            Path("episode_000000"), rows, ["left"], preserve_episodes=True
+        )
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(report["output_frames"], 6)
+        self.assertEqual(report["excluded_samples"], 0)
+        self.assertFalse(report["split_positions"])
+        self.assertEqual(len(report["diagnostic_warnings"]), 1)
+        self.assertTrue(report["alignment_threshold_exceedances"])
+        np.testing.assert_allclose(segments[0].state[:, 0], np.arange(6) / 10)
+        np.testing.assert_allclose(segments[0].action["action_tcp"][-1, :6], 0)
+
     def segments(self, rows, **limits):
         return build_segments(Path("episode_000000"), rows, ["left"], limits)
 
@@ -42,8 +92,8 @@ class QualityTests(unittest.TestCase):
         segments, report = self.segments(samples([0, 0.1, 0.4, 0.5]))
         self.assertEqual(report["output_episodes"], 2)
         for segment in segments:
-            np.testing.assert_allclose(segment.action[-1, :6], 0)
-            np.testing.assert_allclose(segment.action[0, 0], 0.1)
+            np.testing.assert_allclose(segment.action["action_tcp"][-1, :6], 0)
+            np.testing.assert_allclose(segment.action["action_tcp"][0, 0], 0.1)
 
     def test_each_diagnostic_excludes_and_splits(self):
         for column in ("rtde_age_seconds", "camera_left_pairing_skew_seconds"):
@@ -77,7 +127,7 @@ class QualityTests(unittest.TestCase):
         state, _ = interpolate(rows, np.array([0, 0.2]), np.array([0, 0.1, 0.2]))
         np.testing.assert_allclose(abs(state[1, 5]), np.pi)
         np.testing.assert_allclose(state[:, 6], [0, 0, 1])
-        delta = actions(state)
+        delta = actions(state)["action_tcp"]
         np.testing.assert_allclose(delta[:-1, 5], np.deg2rad(10), atol=1e-6)
         np.testing.assert_allclose(delta[-1, :6], 0)
 
@@ -118,6 +168,15 @@ class ConversionTests(unittest.TestCase):
         maps = json.loads((self.source / "clock_maps.json").read_text())
         self.convert(clock_maps=maps, timing_policy="calibrated")
         verify(self.output)
+        info = json.loads((self.output / "meta/info.json").read_text())
+        self.assertEqual(info["data_path"], "data/chunk-{chunk_index:03d}/episode_{file_index:06d}.parquet")
+        self.assertEqual(info["video_path"], "videos/{video_key}/chunk-{chunk_index:03d}/episode_{file_index:06d}.mp4")
+        expected = recorder_reference()["_lerobot_features"]({"left": np.zeros((48, 64, 3), dtype=np.uint8)})
+        for key, feature in expected.items():
+            self.assertEqual(info["features"][key]["dtype"], feature["dtype"])
+            self.assertEqual(info["features"][key]["shape"], list(feature["shape"]))
+            self.assertEqual(info["features"][key]["names"], feature["names"])
+        self.assertEqual(set(info["features"]), set(expected) | {"timestamp", "frame_index", "episode_index", "index", "task_index"})
         self.assertFalse(list(self.root.glob(".dataset-*")))
         with self.assertRaises(ValueError):
             self.convert()

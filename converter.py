@@ -172,9 +172,9 @@ def mapped_times(rows, column, mapping):
 
 
 def align_episode(
-    path, rows, cameras, limits, clock_maps=None, timing_policy="sample-order"
+    path, rows, cameras, limits, clock_maps=None, timing_policy="sample-order", preserve_episodes=False
 ):
-    segments, report = build_segments(path, rows, cameras, limits)
+    segments, report = build_segments(path, rows, cameras, limits, preserve_episodes)
     report.update(
         timing_policy=timing_policy,
         clock_mapping_applied=False,
@@ -217,6 +217,7 @@ def convert(
     clock_maps=None,
     limits=None,
     report_path=None,
+    preserve_episodes=False,
 ):
     limits = DEFAULTS | (limits or {})
     if not cameras or len(set(cameras)) != len(cameras):
@@ -244,7 +245,7 @@ def convert(
                 "robot type and camera dimensions must match across episodes"
             )
         segments, report = align_episode(
-            path, rows, cameras, limits, clock_maps, timing_policy
+            path, rows, cameras, limits, clock_maps, timing_policy, preserve_episodes
         )
         source_reports.append(report)
         source_metadata.append(meta)
@@ -322,6 +323,7 @@ def main():
     )
     parser.add_argument("--report", type=Path)
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--preserve-episodes", action="store_true", help="Keep one output episode per source; timing thresholds only produce diagnostics")
     args = parser.parse_args()
     try:
         maps = json.loads(args.clock_maps.read_text()) if args.clock_maps else None
@@ -341,6 +343,7 @@ def main():
                 "max_camera_rtde_skew_seconds": args.max_camera_rtde_skew_seconds,
             },
             report_path=args.report,
+            preserve_episodes=args.preserve_episodes,
         )
     except (
         ValueError,
