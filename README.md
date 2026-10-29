@@ -34,7 +34,7 @@ python converter.py \
   --repo-id local/ur-drawer
 ```
 
-`--input` 接受單一 episode 或包含 `episode_*` 的父資料夾。預設輸出 `outputs/dataset`，相機為 `left`；雙相機使用 `--cameras left wrist`。`--repo-id` 是資料集識別名稱，不會觸發上傳。
+`--input` 接受單一 episode 或包含 `episode_*` 的父資料夾。預設輸出 `outputs/dataset`，相機為 `arm`，輸出 `observation.images.arm`；舊錄製可指定 `--cameras left` 或 `--cameras right`（保留原相機欄位名稱）；雙相機使用 `--cameras arm wrist`。`--repo-id` 是資料集識別名稱，不會觸發上傳。
 
 若要保持原始 episode 數量，加入 `--preserve-episodes`。每個來源 episode 輸出一個 episode，仍按 CSV 時間重採樣至 10 FPS；採樣間隔、影像對齊與診斷門檻只記錄在品質報告，不排除樣本或切段，插值與 action 會跨越原始時間間隔。來源若不足兩個輸出格點會報錯。
 
@@ -71,7 +71,7 @@ raw_data/my_recording/
   "gripper_source": "commanded",
   "gripper_zero": "fully_open",
   "gripper_one": "fully_closed",
-  "cameras": {"left": "episode_000000.mp4"}
+  "cameras": {"arm": "episode_000000.mp4"}
 }
 ```
 
@@ -86,7 +86,7 @@ frame_index,timestamp,state_x,state_y,state_z,state_rx,state_ry,state_rz,gripper
 必要的品質診斷欄位接在後面：
 
 ```csv
-rtde_age_seconds,camera_left_pairing_skew_seconds
+rtde_age_seconds,camera_arm_pairing_skew_seconds
 ```
 
 每個輸出相機都需有自己的 `camera_<名稱>_pairing_skew_seconds`。診斷缺值、負值或超標會排除該筆。其他附加欄位必須是數值或空白。
@@ -166,7 +166,7 @@ outputs/my_dataset/
     "rtde_controller_timestamp": {
       "scale": 1.0, "offset": 950.0, "provenance": "independent calibration events"
     },
-    "camera_left_sensor_timestamp": {
+    "camera_arm_sensor_timestamp": {
       "scale": 0.001, "offset": 995.0, "provenance": "independent calibration events"
     }
   }
@@ -186,7 +186,7 @@ python -m tools.calibrate_clocks --anchors anchors.json --output clock_maps.json
 ```json
 {
   "episode_000000": {
-    "camera_left_sensor_timestamp": {
+    "camera_arm_sensor_timestamp": {
       "native": [5000, 5500, 6000],
       "common_host_monotonic": [1000, 1000.5, 1001],
       "provenance": "independently matched calibration events"

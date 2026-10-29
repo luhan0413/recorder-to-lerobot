@@ -55,7 +55,7 @@ def camera_files(meta, path):
     return result
 
 
-def inspect_episode(path, required_cameras=("left",)):
+def inspect_episode(path, required_cameras=("arm",)):
     meta = json.loads((path / "episode.json").read_text())
     schema_version = meta.get(
         "raw_schema_version",
@@ -212,7 +212,7 @@ def convert(
     output,
     repo_id,
     validate_only=False,
-    cameras=("left",),
+    cameras=("arm",),
     timing_policy="sample-order",
     clock_maps=None,
     limits=None,
@@ -296,7 +296,7 @@ def main():
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("outputs/dataset"))
     parser.add_argument("--repo-id", default="local/ur-dataset")
-    parser.add_argument("--cameras", nargs="+", default=["left"])
+    parser.add_argument("--cameras", nargs="+", default=["arm"])
     parser.add_argument(
         "--timing-policy", choices=["calibrated", "sample-order"], default=None
     )

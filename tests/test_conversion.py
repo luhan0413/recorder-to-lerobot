@@ -24,7 +24,7 @@ def samples(times):
             timestamp=t,
             gripper_command=float(t >= 0.15),
             rtde_age_seconds=0,
-            camera_left_pairing_skew_seconds=0,
+            camera_arm_pairing_skew_seconds=0,
             **{
                 f"state_{n}": t if n == "x" else 0
                 for n in ("x", "y", "z", "rx", "ry", "rz")
@@ -74,7 +74,7 @@ class QualityTests(unittest.TestCase):
         rows = samples([0, 0.1, 0.4, 0.5])
         rows[1]["rtde_age_seconds"] = 0.2
         segments, report = build_segments(
-            Path("episode_000000"), rows, ["left"], preserve_episodes=True
+            Path("episode_000000"), rows, ["arm"], preserve_episodes=True
         )
         self.assertEqual(len(segments), 1)
         self.assertEqual(report["output_frames"], 6)
@@ -86,7 +86,7 @@ class QualityTests(unittest.TestCase):
         np.testing.assert_allclose(segments[0].action["action_tcp"][-1, :6], 0)
 
     def segments(self, rows, **limits):
-        return build_segments(Path("episode_000000"), rows, ["left"], limits)
+        return build_segments(Path("episode_000000"), rows, ["arm"], limits)
 
     def test_gap_splits_actions(self):
         segments, report = self.segments(samples([0, 0.1, 0.4, 0.5]))
@@ -96,7 +96,7 @@ class QualityTests(unittest.TestCase):
             np.testing.assert_allclose(segment.action["action_tcp"][0, 0], 0.1)
 
     def test_each_diagnostic_excludes_and_splits(self):
-        for column in ("rtde_age_seconds", "camera_left_pairing_skew_seconds"):
+        for column in ("rtde_age_seconds", "camera_arm_pairing_skew_seconds"):
             for value in (None, -0.001, 0.051):
                 with self.subTest(column=column, value=value):
                     rows = samples([0, 0.1, 0.2, 0.3, 0.4])
@@ -171,7 +171,7 @@ class ConversionTests(unittest.TestCase):
         info = json.loads((self.output / "meta/info.json").read_text())
         self.assertEqual(info["data_path"], "data/chunk-{chunk_index:03d}/episode_{file_index:06d}.parquet")
         self.assertEqual(info["video_path"], "videos/{video_key}/chunk-{chunk_index:03d}/episode_{file_index:06d}.mp4")
-        expected = recorder_reference()["_lerobot_features"]({"left": np.zeros((48, 64, 3), dtype=np.uint8)})
+        expected = recorder_reference()["_lerobot_features"]({"arm": np.zeros((48, 64, 3), dtype=np.uint8)})
         for key, feature in expected.items():
             self.assertEqual(info["features"][key]["dtype"], feature["dtype"])
             self.assertEqual(info["features"][key]["shape"], list(feature["shape"]))

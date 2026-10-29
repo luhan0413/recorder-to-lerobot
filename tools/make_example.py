@@ -36,9 +36,9 @@ def generate(output):
             "gripper_zero": "fully_open",
             "gripper_one": "fully_closed",
             "visual_training_eligible": True,
-            "cameras": {"left": video_name},
+            "cameras": {"arm": video_name},
             "camera_specs": {
-                "left": {
+                "arm": {
                     "width": 64,
                     "height": 48,
                     "codec": "libx264rgb",
@@ -49,13 +49,13 @@ def generate(output):
             "sensor_clock_calibration": False,
             "hardware_sync": False,
             "timing_columns": {
-                "camera_left_sensor_timestamp": {
+                "camera_arm_sensor_timestamp": {
                     "unit": "millisecond",
                     "clock": "camera",
                 },
                 "rtde_controller_timestamp": {"unit": "second", "clock": "controller"},
             },
-            "pairing_rule": "abs(camera_left_host_monotonic - rtde_host_monotonic)",
+            "pairing_rule": "abs(camera_arm_host_monotonic - rtde_host_monotonic)",
         }
         (root / "episode.json").write_text(json.dumps(meta, indent=2) + "\n")
         origin = 1000 + episode * 10
@@ -66,9 +66,9 @@ def generate(output):
             "rtde_controller_timestamp",
             "rtde_host_monotonic",
             "rtde_age_seconds",
-            "camera_left_sensor_timestamp",
-            "camera_left_host_monotonic",
-            "camera_left_pairing_skew_seconds",
+            "camera_arm_sensor_timestamp",
+            "camera_arm_host_monotonic",
+            "camera_arm_pairing_skew_seconds",
         ]
         with (root / "frames.csv").open("w", newline="") as file:
             writer = csv.DictWriter(file, fieldnames=COLUMNS + extra)
@@ -97,9 +97,9 @@ def generate(output):
                     rtde_controller_timestamp=50 + t,
                     rtde_host_monotonic=origin + t,
                     rtde_age_seconds=0,
-                    camera_left_sensor_timestamp=5000 + t * 1000,
-                    camera_left_host_monotonic=origin + t,
-                    camera_left_pairing_skew_seconds=0,
+                    camera_arm_sensor_timestamp=5000 + t * 1000,
+                    camera_arm_host_monotonic=origin + t,
+                    camera_arm_pairing_skew_seconds=0,
                 )
                 writer.writerow(row)
         with av.open(str(root / video_name), "w") as container:
@@ -121,7 +121,7 @@ def generate(output):
                 "offset": origin - 50,
                 "provenance": "synthetic exact clock",
             },
-            "camera_left_sensor_timestamp": {
+            "camera_arm_sensor_timestamp": {
                 "scale": 0.001,
                 "offset": origin - 5,
                 "provenance": "synthetic exact clock",

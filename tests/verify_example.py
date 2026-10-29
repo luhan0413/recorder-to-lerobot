@@ -27,7 +27,7 @@ def verify(root):
         assert int(row["frame_index"]) == local
         assert int(row["episode_index"]) == index // 11
         assert bool(row["next.done"]) == (local == 10)
-        assert row["observation.images.left"].shape == (3, 48, 64)
+        assert row["observation.images.arm"].shape == (3, 48, 64)
         if local == 10:
             np.testing.assert_allclose(row["action_tcp"][:6].numpy(), 0)
             np.testing.assert_allclose(row["action_tcp_base"][:6].numpy(), 0)

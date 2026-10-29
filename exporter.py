@@ -78,6 +78,7 @@ def export_dataset(
             robot_type=robot_type,
             features=features,
             video_backend="pyav",
+            image_writer_threads=8,
             rgb_encoder=RGBEncoderConfig(vcodec="h264", crf=18, preset="fast"),
         )
         # Use the same episode filenames as the live v3 recording adapter.
